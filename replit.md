@@ -61,6 +61,12 @@ _Populate as you build — explicit user instructions worth remembering across s
 - Production env vars the API reads: `PORT`, `HOST`, `DATABASE_URL`, `JWT_SECRET` (override the dev fallback!), `GEMINI_API_KEY`, `UPLOAD_DIR`, optional `CORS_ORIGIN`/`MAX_UPLOAD_BYTES`/`CHAT_RATE_LIMIT`/`LOG_LEVEL`.
 - Secrets/exports are gitignored: `deploy/.env.production`, `deploy/*.dump`, `deploy/*.tgz`.
 
+## GitHub sync
+
+- Remote `origin` → `github.com/shedrickknungehn-rgb/hope2academy` (branch `main`).
+- Local `main` and GitHub `main` now share the same history, so ordinary `git push origin main` works — no full-project API re-upload needed.
+- Background: the repl used to be a shallow clone with an unrecoverable missing ancestor, so pushes were rejected. It was re-baselined onto GitHub's root commit. See `.agents/memory/github-sync-shallow.md` for details.
+
 ## Pointers
 
 - See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details

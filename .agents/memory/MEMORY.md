@@ -2,7 +2,7 @@
 - [Mock backend split](mock-backend-split.md) — client uses mockAuth/mockDb (localStorage), server uses in-memory mock-store.ts; users stored separately from other collections
 - [API-first with mock fallback](api-mock-fallback.md) — frontend tries live API first, falls back to localStorage mock on error; JWT stored as h2l.apiToken; signIn exposed via AuthProvider context
 - [Pre-existing TS error](preexisting-ts-error.md) — resizable.tsx shadcn component has a non-breaking TS error; ignore it in CI checks
-- [GitHub sync blocked by shallow repo](github-sync-shallow.md) — push fails on a missing unrecoverable ancestor (shallow clone); re-root fix must run via an isolated task agent, not the main agent
+- [GitHub sync (resolved)](github-sync-shallow.md) — local main re-baselined onto GitHub's root commit; normal `git push origin main` now works, no API re-upload needed
 - [Vercel build config](vercel-deploy.md) — PORT must not be required at vite config top-level (crashes build); VITE_API_BASE_URL needed for Vercel→Replit API routing
 - [Mobile write operations](mobile-attendance.md) — useMutation + apiClient.createItem() is the correct pattern for teacher POST operations on mobile
 - [Gradient reliability](gradient-rendering.md) — oklch CSS vars via var(--gradient-hero) fail silently in some render envs; always use explicit linear-gradient() inline style for dark section backgrounds

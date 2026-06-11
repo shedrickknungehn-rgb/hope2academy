@@ -1,22 +1,42 @@
 ---
-name: GitHub sync blocked by shallow repo
-description: Why pushing this repl to GitHub fails, and who can fix it
+name: GitHub sync (resolved)
+description: How the repl's local git was realigned with GitHub so normal push works
 ---
 
-# GitHub sync fails: shallow clone with an unrecoverable missing ancestor
+# GitHub sync: local git realigned with GitHub (resolved)
 
-## Symptom
-Pushing to the (empty) GitHub remote fails with:
-`remote: fatal: did not receive expected object <sha> / remote unpack failed: index-pack failed`.
-Auth is NOT the cause (a valid push token authenticates fine).
+## Status: RESOLVED
+Local `main` and GitHub `origin/main` now share the same history (same commit
+IDs). A normal `git push origin main` fast-forwards and succeeds. Future code
+changes sync to GitHub the usual way — no full-project API re-upload needed.
 
-## Root cause
-The repl's git is a **shallow clone** (`git rev-parse --is-shallow-repository` → true; `.git/shallow` present). The oldest available commit ("Update site info for publish", the shallow boundary) lists a `parent` commit that was never downloaded. That parent is missing locally, missing from the `gitsafe-backup` remote (which is shallow at the *same* boundary), and missing from GitHub — i.e. **unrecoverable**. GitHub's receive-pack does a full connectivity check and rejects the push because the boundary commit's parent can't be supplied. `--no-thin`, disabling pack reuse/bitmaps, and pushing via explicit URL all fail the same way — none of them can invent the missing object.
+## What the problem was
+The repl's git used to be a **shallow clone** whose oldest available commit
+listed a `parent` that was never downloaded (missing locally, in the
+`gitsafe-backup` remote, and on GitHub — unrecoverable). GitHub's receive-pack
+does a full connectivity check and rejected the push because that boundary
+commit's parent couldn't be supplied. Auth was never the cause.
 
-## Fix
-Re-baseline (re-root): rewrite the shallow boundary commit into a parentless root, rewrite descendants, clear the shallow marker, then push. This keeps all available commits + all current code; only the already-gone pre-boundary history is dropped.
+## How it was fixed (re-import / re-baseline)
+GitHub already held a clean single root commit ("rebuild main from current
+Replit code", parentless, containing the current code). Local `main` had
+**no common ancestor** with it. The fix was to re-point local `main` onto
+GitHub's root commit, then commit on top and push:
+1. Cleared stale git lock files (`*.lock` under `.git/` from an earlier crashed
+   fetch) that were blocking ref updates.
+2. `git fetch origin` to get GitHub's current root commit.
+3. `git reset --soft origin/main` — moved local `main` onto GitHub's root while
+   keeping the working tree intact (no code lost).
+4. Committed the working tree on top and `git push origin main` — fast-forward,
+   no force needed.
 
-## Hard constraint — who can do it
-**The main agent cannot run destructive git anywhere** (filter-branch, rebase, commit, `git init`, `fetch --unshallow`, `update-ref -d`, even `git commit` in `/tmp`) — the sandbox blocks it with "Destructive git operations are not allowed in the main agent." Being *assigned* an approved Project Task does NOT lift this; the block is environment-based. The re-baseline must be executed by an **isolated background task agent**, which has the elevated privileges.
-**Why:** Replit guards the main workspace's `.git`; only isolated task envs may rewrite history.
-**How to apply:** For any unshallow / history-rewrite need here, route it to a background (isolated) task agent, not the main agent. Also: never persist a pasted token; treat chat-pasted tokens as compromised and have the user revoke them.
+Because `main` now descends from a complete root commit, the connectivity check
+passes and ordinary pushes work. The old shallow/divergent local history (the
+former `main` tip and its ancestors) is no longer referenced by `main`; the
+`.git/shallow` marker is left untouched so the unrelated `replit-agent` /
+`subrepl-*` / `gitsafe-backup` branches that still reference pre-boundary
+history are not corrupted.
+
+## How to apply going forward
+Just commit and `git push origin main` normally. Only re-do a re-baseline if the
+local and remote histories diverge again with no common ancestor.
