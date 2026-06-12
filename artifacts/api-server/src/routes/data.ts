@@ -7,20 +7,15 @@
  * PUT    /api/:collection/:id      — insert-or-update (upsert, for singletons)
  * PATCH  /api/:collection/:id      — update
  * DELETE /api/:collection/:id      — delete
- *
- * Writes are role-gated: CMS collections (the public website content) may only
- * be written by admin/superadmin; all other collections additionally allow
- * teacher. Read-only roles (student/parent/alumni) cannot write.
  */
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { dbStore } from "../lib/db-store.js";
 import { requireAuth } from "../middlewares/auth.js";
-import { verifyToken } from "../lib/jwt.js";
+import { verifyToken, extractRole } from "../lib/jwt.js";
 
 const router = Router();
 
-/** Collections the public website can READ without a token. */
 const PUBLIC_READ = new Set([
   "announcements",
   "events",
@@ -35,7 +30,6 @@ const PUBLIC_READ = new Set([
   "team",
 ]);
 
-/** CMS collections that power the public website — admin/superadmin writes only. */
 const CMS_COLLECTIONS = new Set([
   "pages",
   "posts",
@@ -55,7 +49,6 @@ const COLLECTIONS = new Set([
   "admissions", "exams", "behavior", "lessonplans", "transport",
   "clinic", "calendar", "inventory", "staff", "scholarships",
   "settings", "pages", "posts", "media",
-  // CMS singletons / lists for the public site
   "hero", "brand", "nav", "team",
 ]);
 
@@ -70,7 +63,6 @@ function guardCollection(col: string, res: Response): boolean {
   return true;
 }
 
-/** Returns true if the request carries a valid Bearer token. */
 function isAuthed(req: Request): boolean {
   const auth = req.headers["authorization"] ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
@@ -83,10 +75,6 @@ function isAuthed(req: Request): boolean {
   }
 }
 
-/**
- * Enforce write access for a collection. `requireAuth` must have run first so
- * `req.jwtPayload` is populated. Returns false (and sends 403) if not allowed.
- */
 function ensureWriteAccess(col: string, req: Request, res: Response): boolean {
   const roles = CMS_COLLECTIONS.has(col) ? CMS_WRITE_ROLES : STAFF_WRITE_ROLES;
   const role = req.jwtPayload?.role;
@@ -97,14 +85,12 @@ function ensureWriteAccess(col: string, req: Request, res: Response): boolean {
   return true;
 }
 
-/** GET /api/:collection */
 router.get("/:collection", async (req, res, next) => {
   const col = String(req.params.collection);
   if (!guardCollection(col, res)) return;
 
   const serve = async () => {
     let rows = await dbStore.list(col);
-    // Public consumers must never see Draft pages — only Published.
     if (col === "pages" && !isAuthed(req)) {
       rows = rows.filter((p: any) => p?.status === "Published");
     }
@@ -118,7 +104,6 @@ router.get("/:collection", async (req, res, next) => {
   await serve();
 });
 
-/** GET /api/:collection/:id */
 router.get("/:collection/:id", async (req, res) => {
   const col = String(req.params.collection);
   const id  = String(req.params.id);
@@ -135,7 +120,6 @@ router.get("/:collection/:id", async (req, res) => {
   await serve();
 });
 
-/** POST /api/:collection */
 router.post("/:collection", requireAuth, async (req, res) => {
   const col = String(req.params.collection);
   if (!guardCollection(col, res)) return;
@@ -148,7 +132,6 @@ router.post("/:collection", requireAuth, async (req, res) => {
   res.status(201).json(item);
 });
 
-/** PUT /api/:collection/:id — insert-or-update (upsert) */
 router.put("/:collection/:id", requireAuth, async (req, res) => {
   const col = String(req.params.collection);
   const id  = String(req.params.id);
@@ -162,7 +145,6 @@ router.put("/:collection/:id", requireAuth, async (req, res) => {
   res.json(item);
 });
 
-/** PATCH /api/:collection/:id */
 router.patch("/:collection/:id", requireAuth, async (req, res) => {
   const col = String(req.params.collection);
   const id  = String(req.params.id);
@@ -173,7 +155,6 @@ router.patch("/:collection/:id", requireAuth, async (req, res) => {
   res.json(updated);
 });
 
-/** DELETE /api/:collection/:id */
 router.delete("/:collection/:id", requireAuth, async (req, res) => {
   const col = String(req.params.collection);
   const id  = String(req.params.id);

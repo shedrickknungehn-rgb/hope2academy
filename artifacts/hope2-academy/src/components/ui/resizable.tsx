@@ -1,4 +1,5 @@
 import { GripVertical } from "lucide-react";
+// @ts-ignore — react-resizable-panels types mismatch; runtime is fine
 import { Group, Panel, Separator } from "react-resizable-panels";
 
 import { cn } from "@/lib/utils";

@@ -1,42 +1,32 @@
 /**
- * Storage routes — local-disk uploads + public object serving.
+ * Storage routes — Supabase Storage for uploads + public object serving.
  *
  * POST /storage/upload     — (admin/superadmin) multipart upload (field "file").
- *                            Saves to UPLOAD_DIR, returns { objectPath }.
- * GET  /storage/objects/*  — serve an uploaded object (public read; website media).
- *
- * Uploaded media is referenced everywhere by its objectPath ("/objects/<id>").
- * The public website renders it as `${API_BASE}/storage${objectPath}`.
+ *                            Uploads to Supabase Storage bucket "hope2-media",
+ *                            returns { objectPath } where objectPath = "/objects/<id>".
+ * GET  /storage/objects/*  — redirect to the Supabase public URL.
  */
 import { Router, type IRouter, type Request, type Response } from "express";
 import multer from "multer";
+import { createClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
 import { requireAuth, requireRole } from "../middlewares/auth.js";
-import {
-  UPLOAD_DIR,
-  ensureUploadDir,
-  newObjectId,
-  openObject,
-  ObjectNotFoundError,
-} from "../lib/fileStorage.js";
 
 const router: IRouter = Router();
 
-// Create the upload directory eagerly so serving works even before first upload.
-void ensureUploadDir();
+const SUPABASE_URL = process.env["VITE_SUPABASE_URL"] ?? process.env["SUPABASE_URL"] ?? "";
+const SERVICE_KEY = process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "";
+const BUCKET = "hope2-media";
+
+const supabase = createClient(SUPABASE_URL, SERVICE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
 
 const MAX_UPLOAD_BYTES = Number(process.env.MAX_UPLOAD_BYTES || 15 * 1024 * 1024);
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: (_req, _file, cb) => {
-      ensureUploadDir()
-        .then(() => cb(null, UPLOAD_DIR))
-        .catch((err) => cb(err as Error, UPLOAD_DIR));
-    },
-    filename: (_req, file, cb) => {
-      cb(null, newObjectId(file.originalname));
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: MAX_UPLOAD_BYTES },
 });
 
@@ -46,46 +36,53 @@ router.post(
   requireAuth,
   requireRole("superadmin", "admin"),
   (req: Request, res: Response) => {
-    upload.single("file")(req, res, (err: unknown) => {
+    upload.single("file")(req, res, async (err: unknown) => {
       if (err) {
         const isLimit = (err as { code?: string })?.code === "LIMIT_FILE_SIZE";
-        req.log.error({ err }, "Upload failed");
         res
           .status(isLimit ? 413 : 400)
           .json({ error: isLimit ? "File too large" : "Upload failed" });
         return;
       }
-      const file = (req as Request & { file?: { filename: string } }).file;
+      const file = (req as Request & { file?: Express.Multer.File }).file;
       if (!file) {
         res.status(400).json({ error: "No file provided (use form field 'file')" });
         return;
       }
-      res.json({ objectPath: `/objects/${file.filename}` });
+      const ext = path.extname(file.originalname || "").toLowerCase();
+      const safeExt = /^\.[a-z0-9]{1,8}$/.test(ext) ? ext : "";
+      const objectId = `${randomUUID()}${safeExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(objectId, file.buffer, {
+          contentType: file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        req.log?.error?.({ err: uploadError }, "Supabase upload failed");
+        res.status(500).json({ error: "Upload to storage failed" });
+        return;
+      }
+
+      res.json({ objectPath: `/objects/${objectId}` });
     });
   },
 );
 
-/** Serve uploaded object entities (public read — these are website images). */
+/** Redirect to the Supabase public URL for an uploaded object. */
 router.get("/storage/objects/*path", async (req: Request, res: Response) => {
-  try {
-    const raw = (req.params as Record<string, unknown>).path;
-    const wildcardPath = Array.isArray(raw) ? raw.join("/") : String(raw);
-    const obj = await openObject(`/objects/${wildcardPath}`);
-    res.setHeader("Content-Type", obj.contentType);
-    res.setHeader("Content-Length", String(obj.size));
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    obj.stream.on("error", () => {
-      if (!res.headersSent) res.status(500).end();
-    });
-    obj.stream.pipe(res);
-  } catch (error) {
-    if (error instanceof ObjectNotFoundError) {
-      res.status(404).json({ error: "Object not found" });
-      return;
-    }
-    req.log.error({ err: error }, "Error serving object");
-    res.status(500).json({ error: "Failed to serve object" });
+  const raw = (req.params as Record<string, unknown>).path;
+  const wildcardPath = Array.isArray(raw) ? raw.join("/") : String(raw);
+  const objectId = wildcardPath.replace(/^\/+/, "");
+
+  const { data } = supabase.storage.from(BUCKET).getPublicUrl(objectId);
+  if (!data?.publicUrl) {
+    res.status(404).json({ error: "Object not found" });
+    return;
   }
+  res.redirect(302, data.publicUrl);
 });
 
 export default router;

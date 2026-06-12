@@ -1,9 +1,21 @@
+/**
+ * Auth routes — Supabase handles sign-in on the frontend.
+ * This server only exposes /auth/me (profile fetch + update) using the
+ * Supabase JWT the client already holds. Password login is removed — use
+ * Supabase Auth (email/password, magic link, etc.) on the frontend.
+ */
 import { Router } from "express";
+import { createClient } from "@supabase/supabase-js";
 import { dbStore } from "../lib/db-store.js";
-import { signToken } from "../lib/jwt.js";
 import { requireAuth } from "../middlewares/auth.js";
 
 const router = Router();
+
+const supabaseAdmin = createClient(
+  process.env["VITE_SUPABASE_URL"] ?? process.env["SUPABASE_URL"] ?? "",
+  process.env["SUPABASE_SERVICE_ROLE_KEY"] ?? "",
+  { auth: { autoRefreshToken: false, persistSession: false } },
+);
 
 function sanitize(u: Awaited<ReturnType<typeof dbStore.findUserById>>) {
   if (!u) return null;
@@ -11,28 +23,7 @@ function sanitize(u: Awaited<ReturnType<typeof dbStore.findUserById>>) {
   return safe;
 }
 
-/** POST /api/auth/login  { email, password } */
-router.post("/auth/login", async (req, res) => {
-  const { email, password } = req.body ?? {};
-  if (!email || !password) {
-    res.status(400).json({ error: "email and password are required" });
-    return;
-  }
-  const user = await dbStore.findUserByEmail(email);
-  if (!user || !(await dbStore.verifyPassword(password, user.password))) {
-    res.status(401).json({ error: "Invalid email or password" });
-    return;
-  }
-  const token = signToken({ sub: user.id, role: user.role });
-  res.json({ token, user: sanitize(user) });
-});
-
-/** POST /api/auth/logout  (stateless — client drops token) */
-router.post("/auth/logout", (_req, res) => {
-  res.json({ ok: true });
-});
-
-/** GET /api/auth/me */
+/** GET /api/auth/me — returns the current user's profile from our DB */
 router.get("/auth/me", requireAuth, async (req, res) => {
   const user = await dbStore.findUserById(req.jwtPayload!.sub);
   if (!user) {
@@ -42,7 +33,7 @@ router.get("/auth/me", requireAuth, async (req, res) => {
   res.json(sanitize(user));
 });
 
-/** PATCH /api/auth/me  — update own profile */
+/** PATCH /api/auth/me — update own profile */
 router.patch("/auth/me", requireAuth, async (req, res) => {
   const { password: _drop, role: _role, id: _id, ...patch } = req.body ?? {};
   const updated = await dbStore.updateUser(req.jwtPayload!.sub, patch);
@@ -51,6 +42,35 @@ router.patch("/auth/me", requireAuth, async (req, res) => {
     return;
   }
   res.json(sanitize(updated));
+});
+
+/**
+ * POST /api/auth/sync — called after Supabase sign-in to ensure a row
+ * exists in our users table. Creates it from the Supabase user record if missing.
+ * Body: { role? } — optional role override (ignored if user already exists).
+ */
+router.post("/auth/sync", requireAuth, async (req, res) => {
+  const uid = req.jwtPayload!.sub;
+  let user = await dbStore.findUserById(uid);
+  if (!user) {
+    const { data: supaUser } = await supabaseAdmin.auth.admin.getUserById(uid);
+    const email = supaUser?.user?.email ?? "";
+    const name =
+      supaUser?.user?.user_metadata?.name ??
+      supaUser?.user?.user_metadata?.full_name ??
+      email.split("@")[0] ??
+      "User";
+    const role = req.jwtPayload!.role ?? req.body?.role ?? "student";
+    user = await dbStore.createUser({
+      id: uid,
+      email,
+      name,
+      role: role as any,
+      password: "",
+      createdAt: new Date().toISOString(),
+    });
+  }
+  res.json(sanitize(user));
 });
 
 export default router;

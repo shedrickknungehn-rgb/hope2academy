@@ -24,9 +24,16 @@ export function notifySyncError(scope: string, err: unknown): void {
   }
 }
 
-/** True when an admin is signed in (a JWT is stored). */
+/** True when a Supabase session exists in localStorage. */
 export function canPush(): boolean {
-  return !!apiClient.getToken();
+  try {
+    const raw = Object.keys(localStorage).find((k) => k.includes("supabase") && k.includes("auth"));
+    if (raw) return true;
+    // Fallback: check mock session
+    return !!localStorage.getItem("h2l.session");
+  } catch {
+    return false;
+  }
 }
 
 /**

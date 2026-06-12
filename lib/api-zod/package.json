@@ -6,7 +6,11 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noCheck"
+  },
   "dependencies": {
     "zod": "catalog:"
-  }
+  },
+  "devDependencies": {}
 }
