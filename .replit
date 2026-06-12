@@ -18,27 +18,32 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "artifacts/hope2-academy-mobile: Expo"
+args = "Start application"
 
 [[workflows.workflow]]
-name = "artifacts/hope2-academy-mobile: Expo"
+name = "Start application"
 author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "pnpm --filter @workspace/hope2-academy-mobile run dev"
+args = "pnpm --filter @workspace/hope2-academy run dev"
+waitForPort = 5000
 
 [workflows.workflow.metadata]
 outputType = "webview"
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 integrations = ["github:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[[ports]]
+localPort = 5000
+externalPort = 80
 
 [[ports]]
 localPort = 8080

@@ -63,7 +63,7 @@ function lovableAssetPlugin(): Plugin {
 }
 
 const rawPort = process.env.PORT;
-const port = rawPort ? Number(rawPort) : 3000;
+const port = rawPort ? Number(rawPort) : 5000;
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
